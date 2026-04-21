@@ -50,13 +50,16 @@ export default function WorldSector({ onLog, onSpeak, title }: Props) {
   const handleNewsClick = async (item: NewsItem) => {
     setSelected(item);
     setSummarizing(true);
+    onLog(`Bypassing CORS for World Feed...`, 'processing');
     onLog(`Analyzing: "${item.title.slice(0, 40)}..."`, 'processing');
 
     try {
       const summary = await summarizeNews(item.title, item.summary, 30);
       setSummarizing(false);
       onLog(`Summary prepared`, 'success');
-      onSpeak(`${title}, here is the briefing: ${summary}`);
+      onLog(`Synthesizing voice output...`, 'processing');
+      onSpeak(`Certainly, here is the intelligence brief: ${summary}`);
+      onLog(`Voice briefing delivered`, 'success');
     } catch (err) {
       setSummarizing(false);
       onLog('Summarization error', 'warning');

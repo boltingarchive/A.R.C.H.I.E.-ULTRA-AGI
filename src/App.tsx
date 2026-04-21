@@ -56,8 +56,8 @@ function SectorPanel({ id, title, onLog, onKeyword, settings, onSettingsUpdate, 
     switch (id) {
       case 'world': return <WorldSector onLog={onLog} onSpeak={onSpeak} title={title} />;
       case 'finance': return <FinanceSector onLog={onLog} onSpeak={onSpeak} title={title} />;
-      case 'tech': return <TechSector onLog={onLog} />;
-      case 'region': return <RegionSector onLog={onLog} />;
+      case 'tech': return <TechSector onLog={onLog} onSpeak={onSpeak} title={title} />;
+      case 'region': return <RegionSector onLog={onLog} onSpeak={onSpeak} title={title} />;
       case 'mainframe': return <MainframeSector title={title} onLog={onLog} onKeyword={onKeyword} onSpeak={onSpeak} />;
       case 'settings': return <SettingsSector settings={settings} onUpdate={onSettingsUpdate} onLog={onLog} />;
     }

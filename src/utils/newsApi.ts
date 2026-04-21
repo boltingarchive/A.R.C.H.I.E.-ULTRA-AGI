@@ -1,9 +1,23 @@
 import type { NewsItem, FinanceItem, Hotspot } from '../types';
 
+// CORS-safe RSS aggregators (multiple fallbacks)
 const RSS2JSON = 'https://api.rss2json.com/v1/api.json?rss_url=';
-const GNEWS_API = 'https://gnews.io/api/v4/search';
+const RSS_BRIDGE = 'https://rss-bridge.org/bridge01/?action=display&bridge=';
 
-const PRIORITY_KEYWORDS = ['crash', 'breakthrough', 'crisis', 'collapse', 'emergency', 'alert', 'surge', 'plunge'];
+// Reliable RSS feeds (CORS-friendly via aggregator)
+const TECH_FEEDS = [
+  'https://feeds.theverge.com/rss/index.xml', // The Verge
+  'https://feeds.wired.com/feed/rss/sections/culture', // Wired
+  'https://feeds.theguardian.com/theguardian/technology/rss', // Guardian Tech
+];
+
+const WORLD_FEEDS = [
+  'https://feeds.bbci.co.uk/news/world/rss.xml', // BBC World
+  'https://feeds.reuters.com/reuters/worldNews', // Reuters World
+  'https://feeds.theguardian.com/theguardian/world/rss', // Guardian World
+];
+
+const PRIORITY_KEYWORDS = ['crash', 'breakthrough', 'crisis', 'collapse', 'emergency', 'alert', 'surge', 'plunge', 'ban', 'scandal'];
 
 // Major countries for nation-based news fetching
 export const MAJOR_NATIONS = [
@@ -58,73 +72,90 @@ function makeId(): string {
   return Math.random().toString(36).slice(2);
 }
 
-async function fetchRSS(url: string): Promise<NewsItem[]> {
+async function fetchRSS(url: string, source?: string): Promise<NewsItem[]> {
   try {
-    const res = await fetch(`${RSS2JSON}${encodeURIComponent(url)}&count=20`);
+    // Use RSS2JSON CORS-safe aggregator
+    const encodedUrl = encodeURIComponent(url);
+    const res = await fetch(`${RSS2JSON}${encodedUrl}&count=20&api_key=free`, {
+      headers: {
+        'Accept': 'application/json',
+      }
+    });
+
+    if (!res.ok) throw new Error(`API returned ${res.status}`);
+
     const data = await res.json();
-    if (!data.items) return [];
-    return data.items.slice(0, 15).map((item: Record<string, string>) => ({
+    if (!data.items || data.items.length === 0) return [];
+
+    return data.items.slice(0, 15).map((item: Record<string, any>) => ({
       id: makeId(),
       title: item.title || 'Untitled',
-      summary: item.description?.replace(/<[^>]+>/g, '').slice(0, 200) || '',
-      source: data.feed?.title || 'Unknown',
-      url: item.link || '#',
-      timestamp: new Date(item.pubDate || Date.now()),
-      priority: hasPriority(item.title || '') || hasPriority(item.description || ''),
+      summary: (item.description || item.content || '')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&[a-z]+;/g, '')
+        .slice(0, 200) || '',
+      source: source || data.feed?.title || 'News Feed',
+      url: item.link || item.url || '#',
+      timestamp: new Date(item.pubDate || item.published || Date.now()),
+      priority: hasPriority((item.title || '') + ' ' + (item.description || '')),
     }));
-  } catch {
+  } catch (err) {
+    console.error('RSS fetch error:', err);
     return [];
   }
 }
 
 export async function fetchCountryNews(countryCode: string, countryName: string): Promise<NewsItem[]> {
   try {
-    // Try GNews API first (no auth required for basic use)
-    const res = await fetch(
-      `${GNEWS_API}?q=${encodeURIComponent(countryName)}&lang=en&max=15&sortby=publishedAt`,
-      { headers: { 'Accept': 'application/json' } }
-    );
+    // Fetch world news and filter by country keywords
+    const worldNews = await fetchWorldNews();
 
-    if (!res.ok) throw new Error('GNews API unavailable');
+    // Filter news items that mention the country or related keywords
+    const countryLower = countryName.toLowerCase();
+    const filtered = worldNews.filter(item => {
+      const text = `${item.title} ${item.summary}`.toLowerCase();
+      return text.includes(countryLower) ||
+             (countryCode === 'gb' && text.includes('britain')) ||
+             (countryCode === 'gb' && text.includes('uk')) ||
+             (countryCode === 'us' && text.includes('america'));
+    });
 
-    const data = await res.json();
-    if (!data.articles) return [];
-
-    return data.articles.map((article: Record<string, string>) => ({
-      id: makeId(),
-      title: article.title || 'Untitled',
-      summary: article.description || article.content?.slice(0, 200) || '',
-      source: article.source?.name || 'Unknown',
-      url: article.url || '#',
-      timestamp: new Date(article.publishedAt || Date.now()),
-      priority: hasPriority(article.title || '') || hasPriority(article.description || ''),
-    }));
+    // If no country-specific news found, return all world news
+    return filtered.length > 0 ? filtered : worldNews;
   } catch {
-    // Fallback to generic world news if country-specific fails
+    // Fallback to generic world news if anything fails
     return fetchWorldNews();
   }
 }
 
 export async function fetchWorldNews(): Promise<NewsItem[]> {
-  const feeds = [
-    'https://feeds.bbci.co.uk/news/world/rss.xml',
-    'https://rss.nytimes.com/services/xml/rss/nyt/World.xml',
-  ];
-  const results = await Promise.allSettled(feeds.map(fetchRSS));
+  const results = await Promise.allSettled([
+    fetchRSS(WORLD_FEEDS[0], 'BBC World'),
+    fetchRSS(WORLD_FEEDS[1], 'Reuters'),
+    fetchRSS(WORLD_FEEDS[2], 'The Guardian'),
+  ]);
+
   const items = results.flatMap(r => (r.status === 'fulfilled' ? r.value : []));
-  return items.slice(0, 20);
+  return items.slice(0, 25);
 }
 
 export async function fetchTechNews(): Promise<NewsItem[]> {
   try {
-    const topIds = await fetch('https://hacker-news.firebaseio.com/v0/topstories.json').then(r => r.json());
+    // Try Hacker News first (most reliable)
+    const topIds = await fetch('https://hacker-news.firebaseio.com/v0/topstories.json', {
+      signal: AbortSignal.timeout(5000)
+    }).then(r => r.json());
+
     const ids: number[] = topIds.slice(0, 15);
     const stories = await Promise.allSettled(
       ids.map((id: number) =>
-        fetch(`https://hacker-news.firebaseio.com/v0/item/${id}.json`).then(r => r.json())
+        fetch(`https://hacker-news.firebaseio.com/v0/item/${id}.json`, {
+          signal: AbortSignal.timeout(3000)
+        }).then(r => r.json())
       )
     );
-    return stories
+
+    const hnItems = stories
       .filter(r => r.status === 'fulfilled')
       .map(r => (r as PromiseFulfilledResult<Record<string, unknown>>).value)
       .filter(s => s && s.title)
@@ -137,9 +168,21 @@ export async function fetchTechNews(): Promise<NewsItem[]> {
         timestamp: new Date((s.time as number) * 1000),
         priority: hasPriority(s.title as string),
       }));
-  } catch {
-    return fetchRSS('https://feeds.feedburner.com/TechCrunch');
+
+    if (hnItems.length > 0) return hnItems;
+  } catch (err) {
+    console.error('Hacker News fetch failed:', err);
   }
+
+  // Fallback to RSS feeds
+  const results = await Promise.allSettled([
+    fetchRSS(TECH_FEEDS[0], 'The Verge'),
+    fetchRSS(TECH_FEEDS[1], 'Wired'),
+    fetchRSS(TECH_FEEDS[2], 'The Guardian Tech'),
+  ]);
+
+  const items = results.flatMap(r => (r.status === 'fulfilled' ? r.value : []));
+  return items.slice(0, 25);
 }
 
 export async function fetchFinanceNews(): Promise<NewsItem[]> {

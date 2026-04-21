@@ -1,19 +1,24 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { MapPin, ExternalLink, Clock } from 'lucide-react';
+import { MapPin, ExternalLink, Clock, Loader } from 'lucide-react';
 import type { NewsItem } from '../../types';
 import { fetchRegionNews } from '../../utils/newsApi';
+import { summarizeNews } from '../../utils/aiSummarize';
 
 interface Props {
   onLog: (msg: string, type?: 'info' | 'warning' | 'success' | 'processing') => void;
+  onSpeak?: (text: string) => void;
+  title?: string;
 }
 
 const REGIONS = ['All', 'UK', 'US', 'Europe', 'Asia', 'Americas'];
 
-export default function RegionSector({ onLog }: Props) {
+export default function RegionSector({ onLog, onSpeak, title }: Props) {
   const [news, setNews] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeRegion, setActiveRegion] = useState('All');
+  const [selected, setSelected] = useState<NewsItem | null>(null);
+  const [summarizing, setSummarizing] = useState(false);
 
   useEffect(() => {
     onLog('Triangulating regional data feeds...', 'processing');
@@ -23,6 +28,27 @@ export default function RegionSector({ onLog }: Props) {
       onLog(`Region sector: ${items.length} local stories aggregated`, 'success');
     });
   }, []);
+
+  const handleNewsClick = async (item: NewsItem) => {
+    setSelected(item);
+    setSummarizing(true);
+    onLog(`Bypassing CORS for Region Feed...`, 'processing');
+    onLog(`Analyzing: "${item.title.slice(0, 40)}..."`, 'processing');
+
+    try {
+      const summary = await summarizeNews(item.title, item.summary, 30);
+      setSummarizing(false);
+      onLog(`Summary prepared`, 'success');
+      onLog(`Synthesizing voice output...`, 'processing');
+      if (onSpeak) {
+        onSpeak(`Certainly, here is the intelligence brief: ${summary}`);
+      }
+      onLog(`Voice briefing delivered`, 'success');
+    } catch (err) {
+      setSummarizing(false);
+      onLog('Summarization error', 'warning');
+    }
+  };
 
   const filtered = news;
 
@@ -55,7 +81,7 @@ export default function RegionSector({ onLog }: Props) {
         ))}
       </div>
 
-      <div className="flex-1 overflow-y-auto space-y-2" style={{ scrollbarWidth: 'thin' }}>
+      <div className="flex-1 overflow-y-auto space-y-2 pr-1" style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(0,210,255,0.4) rgba(0,5,15,0.5)' }}>
         {loading ? (
           Array.from({ length: 8 }).map((_, i) => (
             <motion.div
@@ -74,18 +100,29 @@ export default function RegionSector({ onLog }: Props) {
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: i * 0.04 }}
               whileHover={{ x: 4 }}
-              className="rounded-lg p-3"
+              onClick={() => handleNewsClick(item)}
+              className="rounded-lg p-3 cursor-pointer transition-all"
               style={{
-                background: item.priority ? 'rgba(255,100,100,0.08)' : 'rgba(255,170,0,0.05)',
-                border: `1px solid ${item.priority ? 'rgba(255,100,100,0.25)' : 'rgba(255,170,0,0.12)'}`,
+                background: selected?.id === item.id ? 'rgba(255,170,0,0.12)' : item.priority ? 'rgba(255,100,100,0.08)' : 'rgba(255,170,0,0.05)',
+                border: `1px solid ${selected?.id === item.id ? 'rgba(255,170,0,0.3)' : item.priority ? 'rgba(255,100,100,0.25)' : 'rgba(255,170,0,0.12)'}`,
               }}
             >
-              <p className="text-xs font-medium leading-relaxed mb-1.5" style={{ color: 'rgba(240,220,180,0.9)' }}>
+              <p className="text-xs font-medium leading-relaxed mb-1.5" style={{ color: item.priority ? '#ff8888' : 'rgba(240,220,180,0.9)' }}>
                 {item.title}
               </p>
+              {selected?.id === item.id && summarizing && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-1.5 mb-2">
+                  <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity }}>
+                    <Loader size={11} style={{ color: '#ffaa00' }} />
+                  </motion.div>
+                  <span className="text-xs font-mono" style={{ color: 'rgba(255,170,0,0.6)' }}>Summarizing...</span>
+                </motion.div>
+              )}
+              {!summarizing && (
               <p className="text-xs leading-relaxed mb-2" style={{ color: 'rgba(190,170,140,0.6)' }}>
                 {item.summary.slice(0, 120)}{item.summary.length > 120 ? '...' : ''}
               </p>
+              )}
               <div className="flex items-center gap-2">
                 <Clock size={9} style={{ color: 'rgba(255,170,0,0.5)' }} />
                 <span className="text-xs font-mono" style={{ color: 'rgba(255,170,0,0.5)' }}>
@@ -94,7 +131,8 @@ export default function RegionSector({ onLog }: Props) {
                 <span className="text-xs font-mono" style={{ color: 'rgba(200,180,150,0.4)' }}>·</span>
                 <span className="text-xs font-mono" style={{ color: 'rgba(200,180,150,0.5)' }}>{item.source}</span>
                 <a href={item.url} target="_blank" rel="noopener noreferrer" className="ml-auto"
-                  style={{ color: 'rgba(255,170,0,0.5)' }}>
+                  style={{ color: 'rgba(255,170,0,0.5)' }}
+                  onClick={e => e.stopPropagation()}>
                   <ExternalLink size={10} />
                 </a>
               </div>

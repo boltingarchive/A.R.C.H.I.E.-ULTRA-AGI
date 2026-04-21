@@ -31,6 +31,7 @@ export default function FinanceSector({ onLog, onSpeak, title }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<string | null>(null);
   const [summarizing, setSummarizing] = useState(false);
+  const [selectedNews, setSelectedNews] = useState<NewsItem | null>(null);
 
   const load = async () => {
     setRefreshing(true);
@@ -61,6 +62,27 @@ export default function FinanceSector({ onLog, onSpeak, title }: Props) {
       if (onSpeak && title) {
         onSpeak(`${title}, here is the briefing on ${asset.symbol}: ${summary}`);
       }
+    } catch (err) {
+      setSummarizing(false);
+      onLog?.('Summarization error', 'warning');
+    }
+  };
+
+  const handleNewsClick = async (item: NewsItem) => {
+    setSelectedNews(item);
+    setSummarizing(true);
+    onLog?.(`Bypassing CORS for Finance Feed...`, 'processing');
+    onLog?.(`Analyzing: "${item.title.slice(0, 40)}..."`, 'processing');
+
+    try {
+      const summary = await summarizeNews(item.title, item.summary, 30);
+      setSummarizing(false);
+      onLog?.(`Summary prepared`, 'success');
+      onLog?.(`Synthesizing voice output...`, 'processing');
+      if (onSpeak) {
+        onSpeak(`Certainly, here is the intelligence brief: ${summary}`);
+      }
+      onLog?.(`Voice briefing delivered`, 'success');
     } catch (err) {
       setSummarizing(false);
       onLog?.('Summarization error', 'warning');
@@ -150,25 +172,40 @@ export default function FinanceSector({ onLog, onSpeak, title }: Props) {
           <TrendingUp size={14} style={{ color: '#00ff88' }} />
           <span className="font-mono text-sm font-bold" style={{ color: '#00ff88' }}>MARKET NEWS</span>
         </div>
-        <div className="flex-1 overflow-y-auto space-y-2" style={{ scrollbarWidth: 'thin' }}>
-          {news.map(item => (
-            <motion.a
+        <div className="flex-1 overflow-y-auto space-y-2 pr-1" style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(0,210,255,0.4) rgba(0,5,15,0.5)' }}>
+          {news.map((item, i) => (
+            <motion.div
               key={item.id}
-              href={item.url}
-              target="_blank"
-              rel="noopener noreferrer"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
+              transition={{ delay: i * 0.04 }}
               whileHover={{ x: 3 }}
-              className="block rounded-lg p-3 group"
-              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(0,255,136,0.08)' }}
+              onClick={() => handleNewsClick(item)}
+              className="rounded-lg p-3 cursor-pointer transition-all"
+              style={{
+                background: selectedNews?.id === item.id ? 'rgba(0,255,136,0.12)' : item.priority ? 'rgba(255,100,100,0.08)' : 'rgba(255,255,255,0.04)',
+                border: `1px solid ${selectedNews?.id === item.id ? 'rgba(0,255,136,0.3)' : item.priority ? 'rgba(255,100,100,0.25)' : 'rgba(0,255,136,0.08)'}`
+              }}
             >
-              <p className="text-xs leading-relaxed" style={{ color: 'rgba(200,230,210,0.85)' }}>{item.title}</p>
+              <p className="text-xs leading-relaxed" style={{ color: item.priority ? '#ff8888' : 'rgba(200,230,210,0.85)' }}>{item.title}</p>
+              {selectedNews?.id === item.id && summarizing && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-1.5 mt-2">
+                  <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity }}>
+                    <Loader size={11} style={{ color: '#00ff88' }} />
+                  </motion.div>
+                  <span className="text-xs font-mono" style={{ color: 'rgba(0,255,136,0.6)' }}>Summarizing...</span>
+                </motion.div>
+              )}
               <div className="flex items-center gap-1 mt-1.5">
-                <span className="text-xs font-mono" style={{ color: 'rgba(0,255,136,0.5)' }}>{item.source}</span>
-                <ExternalLink size={9} className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: '#00ff88' }} />
+                <span className="text-xs font-mono" style={{ color: item.priority ? 'rgba(255,100,100,0.7)' : 'rgba(0,255,136,0.5)' }}>{item.source}</span>
+                <a href={item.url} target="_blank" rel="noopener noreferrer" className="ml-auto"
+                  style={{ color: '#00ff88' }}
+                  onClick={e => e.stopPropagation()}
+                >
+                  <ExternalLink size={9} />
+                </a>
               </div>
-            </motion.a>
+            </motion.div>
           ))}
         </div>
       </div>
