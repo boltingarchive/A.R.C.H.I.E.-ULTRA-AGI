@@ -12,8 +12,12 @@ export function useVoice(settings: ArchieSettings, onTranscript: (text: string) 
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [recordingLevel, setRecordingLevel] = useState(0);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const restartTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animFrameRef = useRef<number | null>(null);
 
   const SpeechRecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
   const supported = !!SpeechRecognitionClass;
@@ -29,6 +33,43 @@ export function useVoice(settings: ArchieSettings, onTranscript: (text: string) 
       }
     }
   }, [settings.listeningEnabled]);
+
+  // Initialize audio level visualization
+  useEffect(() => {
+    if (!isListening || !settings.listeningEnabled) return;
+
+    const initAudioLevel = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const analyser = audioContext.createAnalyser();
+        const source = audioContext.createMediaStreamSource(stream);
+        source.connect(analyser);
+
+        audioContextRef.current = audioContext;
+        analyserRef.current = analyser;
+
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        const updateLevel = () => {
+          analyser.getByteFrequencyData(dataArray);
+          const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+          setRecordingLevel(Math.min(1, average / 128));
+          animFrameRef.current = requestAnimationFrame(updateLevel);
+        };
+        updateLevel();
+      } catch (err) {
+        console.error('Audio level visualization failed:', err);
+      }
+    };
+
+    initAudioLevel();
+
+    return () => {
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      if (audioContextRef.current) audioContextRef.current.close();
+      setRecordingLevel(0);
+    };
+  }, [isListening, settings.listeningEnabled]);
 
   useEffect(() => {
     if (!supported) return;
@@ -117,5 +158,5 @@ export function useVoice(settings: ArchieSettings, onTranscript: (text: string) 
     setIsSpeaking(false);
   }, []);
 
-  return { isListening, transcript, isSpeaking, speak, stopSpeaking, supported };
+  return { isListening, transcript, isSpeaking, speak, stopSpeaking, supported, recordingLevel };
 }

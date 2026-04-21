@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Globe, ExternalLink, Radio, Zap, Play, Loader } from 'lucide-react';
-import type { NewsItem, Hotspot } from '../../types';
-import { fetchWorldNews, NEWS_HOTSPOTS } from '../../utils/newsApi';
+import { Globe, ExternalLink, Radio, Loader, MapPin } from 'lucide-react';
+import type { NewsItem } from '../../types';
+import { fetchCountryNews, fetchWorldNews, MAJOR_NATIONS } from '../../utils/newsApi';
 import { summarizeNews } from '../../utils/aiSummarize';
 
 interface Props {
@@ -12,22 +12,40 @@ interface Props {
 }
 
 export default function WorldSector({ onLog, onSpeak, title }: Props) {
+  const [news, setNews] = useState<NewsItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState<NewsItem | null>(null);
+  const [selectedCountry, setSelectedCountry] = useState<typeof MAJOR_NATIONS[0] | null>(null);
+  const [summarizing, setSummarizing] = useState(false);
+  const [hoveredNation, setHoveredNation] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
   const rotRef = useRef(0);
-  const [news, setNews] = useState<NewsItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<NewsItem | null>(null);
-  const [summarizing, setSummarizing] = useState(false);
 
+  // Load world news on mount
   useEffect(() => {
-    onLog('Scanning global news networks...', 'processing');
-    fetchWorldNews().then(items => {
+    const loadNews = async () => {
+      setLoading(true);
+      onLog('Scanning global news networks...', 'processing');
+      const items = await fetchWorldNews();
       setNews(items);
       setLoading(false);
-      onLog(`World sector: ${items.length} headlines loaded`, 'success');
-    });
+      onLog(`Global intelligence: ${items.length} headlines loaded`, 'success');
+    };
+    loadNews();
   }, [onLog]);
+
+  // Load country-specific news
+  const handleCountrySelect = async (country: typeof MAJOR_NATIONS[0]) => {
+    setSelectedCountry(country);
+    setSelected(null);
+    setLoading(true);
+    onLog(`Fetching news from ${country.name}...`, 'processing');
+    const items = await fetchCountryNews(country.code, country.name);
+    setNews(items);
+    setLoading(false);
+    onLog(`${country.name}: ${items.length} headlines loaded`, 'success');
+  };
 
   const handleNewsClick = async (item: NewsItem) => {
     setSelected(item);
@@ -37,14 +55,15 @@ export default function WorldSector({ onLog, onSpeak, title }: Props) {
     try {
       const summary = await summarizeNews(item.title, item.summary, 30);
       setSummarizing(false);
-      onLog(`Summary prepared for ${item.source}`, 'success');
-      onSpeak(summary);
+      onLog(`Summary prepared`, 'success');
+      onSpeak(`${title}, here is the briefing: ${summary}`);
     } catch (err) {
       setSummarizing(false);
       onLog('Summarization error', 'warning');
     }
   };
 
+  // Canvas globe animation
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -112,18 +131,23 @@ export default function WorldSector({ onLog, onSpeak, title }: Props) {
       }
 
       const time = Date.now() / 1000;
-      NEWS_HOTSPOTS.forEach((hs: Hotspot) => {
+      const hotspots = selectedCountry ? [{ lat: selectedCountry.lat, lng: selectedCountry.lng, label: selectedCountry.name, intensity: 1.0 }] : MAJOR_NATIONS.slice(0, 12);
+      hotspots.forEach((hs) => {
         const p = project(hs.lat, hs.lng, rotRef.current);
         if (p.z < -0.05) return;
         const pulse = 0.5 + 0.5 * Math.sin(time * 2.5 + hs.lng * 0.02);
-        const size = 2.5 + hs.intensity * 3.5;
+        const size = selectedCountry && hs.label === selectedCountry.name ? 5 : 2.5 + hs.intensity * 3.5;
         ctx.beginPath();
         ctx.arc(p.x, p.y, size * pulse, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(255,${40 + Math.floor(pulse * 60)},30,${0.7 + pulse * 0.3})`;
+        ctx.fillStyle = selectedCountry && hs.label === selectedCountry.name
+          ? `rgba(0,255,136,${0.8})`
+          : `rgba(255,${40 + Math.floor(pulse * 60)},30,${0.7 + pulse * 0.3})`;
         ctx.fill();
         ctx.beginPath();
         ctx.arc(p.x, p.y, size * 2.2 * pulse, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(255,80,60,${0.35 * pulse})`;
+        ctx.strokeStyle = selectedCountry && hs.label === selectedCountry.name
+          ? `rgba(0,255,136,${0.35 * pulse})`
+          : `rgba(255,80,60,${0.35 * pulse})`;
         ctx.lineWidth = 1;
         ctx.stroke();
       });
@@ -142,14 +166,17 @@ export default function WorldSector({ onLog, onSpeak, title }: Props) {
     drawGlobe();
 
     return () => cancelAnimationFrame(animRef.current);
-  }, []);
+  }, [selectedCountry]);
 
   return (
-    <div className="flex h-full gap-4 p-4">
-      <div className="flex-1 flex flex-col">
+    <div className="flex h-full gap-4 p-4 flex-col lg:flex-row">
+      {/* Left: News Feed */}
+      <div className="flex-1 flex flex-col min-h-0">
         <div className="flex items-center gap-2 mb-3">
           <Globe size={16} style={{ color: '#00d2ff' }} />
-          <span className="font-mono text-sm font-bold" style={{ color: '#00d2ff' }}>GLOBAL INTELLIGENCE FEED</span>
+          <span className="font-mono text-sm font-bold" style={{ color: '#00d2ff' }}>
+            {selectedCountry ? selectedCountry.name.toUpperCase() : 'GLOBAL INTELLIGENCE'}
+          </span>
           <motion.div
             animate={{ opacity: [1, 0.3, 1] }}
             transition={{ duration: 1.5, repeat: Infinity }}
@@ -158,6 +185,33 @@ export default function WorldSector({ onLog, onSpeak, title }: Props) {
             <Radio size={12} style={{ color: '#00d2ff' }} />
             <span className="text-xs font-mono" style={{ color: '#00d2ff' }}>LIVE</span>
           </motion.div>
+        </div>
+
+        {/* Nation Selector */}
+        <div className="mb-3 p-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(0,210,255,0.08)' }}>
+          <div className="text-xs font-mono mb-2" style={{ color: 'rgba(0,210,255,0.5)' }}>SELECT NATION</div>
+          <div className="grid grid-cols-3 sm:grid-cols-5 gap-1">
+            {MAJOR_NATIONS.map(nation => (
+              <button
+                key={nation.code}
+                onMouseEnter={() => setHoveredNation(nation.code)}
+                onMouseLeave={() => setHoveredNation(null)}
+                onClick={() => handleCountrySelect(nation)}
+                className="px-2 py-1 rounded text-xs font-mono transition-all"
+                style={{
+                  background: selectedCountry?.code === nation.code
+                    ? 'rgba(0,210,255,0.25)'
+                    : hoveredNation === nation.code
+                    ? 'rgba(0,210,255,0.12)'
+                    : 'rgba(255,255,255,0.05)',
+                  color: selectedCountry?.code === nation.code ? '#00d2ff' : 'rgba(200,220,240,0.6)',
+                  border: `1px solid ${selectedCountry?.code === nation.code ? 'rgba(0,210,255,0.4)' : 'rgba(0,210,255,0.1)'}`,
+                }}
+              >
+                {nation.code.toUpperCase()}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto space-y-2 pr-1" style={{ scrollbarWidth: 'thin' }}>
@@ -204,11 +258,7 @@ export default function WorldSector({ onLog, onSpeak, title }: Props) {
                           {item.summary}
                         </p>
                         {summarizing && (
-                          <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            className="flex items-center gap-1.5 mt-2"
-                          >
+                          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-1.5 mt-2">
                             <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity }}>
                               <Loader size={11} style={{ color: '#00d2ff' }} />
                             </motion.div>
@@ -221,25 +271,12 @@ export default function WorldSector({ onLog, onSpeak, title }: Props) {
                             style={{ color: '#00d2ff' }}
                             onClick={e => e.stopPropagation()}
                           >
-                            Read full article <ExternalLink size={10} />
+                            Read article <ExternalLink size={10} />
                           </a>
                         )}
                       </motion.div>
                     )}
                     <div className="flex items-center gap-2 mt-1.5">
-                      {selected?.id === item.id && !summarizing && (
-                        <button
-                          onClick={e => {
-                            e.stopPropagation();
-                            handleNewsClick(item);
-                          }}
-                          className="flex items-center gap-1 px-2 py-1 rounded text-xs font-mono transition-all"
-                          style={{ background: 'rgba(0,210,255,0.2)', color: '#00d2ff', border: '1px solid rgba(0,210,255,0.3)' }}
-                        >
-                          <Play size={10} />
-                          SUMMARIZE
-                        </button>
-                      )}
                       <span className="text-xs font-mono" style={{ color: 'rgba(0,210,255,0.5)' }}>{item.source}</span>
                       <span className="text-xs" style={{ color: 'rgba(150,170,190,0.4)' }}>
                         {item.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -253,29 +290,26 @@ export default function WorldSector({ onLog, onSpeak, title }: Props) {
         </div>
       </div>
 
-      <div className="w-72 shrink-0">
+      {/* Right: Globe */}
+      <div className="w-full lg:w-80 shrink-0 flex flex-col">
         <div className="rounded-xl overflow-hidden w-full aspect-square"
           style={{ background: 'rgba(0,5,20,0.8)', border: '1px solid rgba(0,210,255,0.15)' }}
         >
           <canvas ref={canvasRef} className="w-full h-full" />
         </div>
-        <div className="mt-3 space-y-1.5">
-          <div className="text-xs font-mono" style={{ color: 'rgba(0,210,255,0.4)', fontSize: '9px' }}>HOTSPOT ZONES</div>
-          <div className="grid grid-cols-2 gap-1.5">
-            {NEWS_HOTSPOTS.slice(0, 8).map(hs => (
-              <div key={hs.label} className="flex items-center gap-1.5 px-2 py-1 rounded"
-                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,30,30,0.15)' }}
-              >
-                <motion.div
-                  animate={{ scale: [1, 1.5, 1], opacity: [0.8, 0.3, 0.8] }}
-                  transition={{ duration: 1.5, repeat: Infinity }}
-                  className="w-1 h-1 rounded-full bg-red-500"
-                />
-                <span className="text-xs font-mono" style={{ color: 'rgba(200,220,240,0.6)' }}>{hs.label}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+        {selectedCountry && (
+          <button
+            onClick={() => { setSelectedCountry(null); setNews([]); }}
+            className="mt-2 w-full py-2 rounded-lg text-xs font-mono transition-all"
+            style={{
+              background: 'rgba(255,255,255,0.06)',
+              color: '#00d2ff',
+              border: '1px solid rgba(0,210,255,0.2)',
+            }}
+          >
+            Clear Selection
+          </button>
+        )}
       </div>
     </div>
   );

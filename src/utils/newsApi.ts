@@ -1,8 +1,54 @@
 import type { NewsItem, FinanceItem, Hotspot } from '../types';
 
 const RSS2JSON = 'https://api.rss2json.com/v1/api.json?rss_url=';
+const GNEWS_API = 'https://gnews.io/api/v4/search';
 
-const PRIORITY_KEYWORDS = ['crash', 'breakthrough', 'crisis', 'collapse', 'emergency', 'alert'];
+const PRIORITY_KEYWORDS = ['crash', 'breakthrough', 'crisis', 'collapse', 'emergency', 'alert', 'surge', 'plunge'];
+
+// Major countries for nation-based news fetching
+export const MAJOR_NATIONS = [
+  { code: 'us', name: 'United States', lat: 37.0902, lng: -95.7129 },
+  { code: 'gb', name: 'United Kingdom', lat: 55.3781, lng: -3.436 },
+  { code: 'de', name: 'Germany', lat: 51.1657, lng: 10.4515 },
+  { code: 'fr', name: 'France', lat: 46.2276, lng: 2.2137 },
+  { code: 'jp', name: 'Japan', lat: 36.2048, lng: 138.2529 },
+  { code: 'cn', name: 'China', lat: 35.8617, lng: 104.1954 },
+  { code: 'in', name: 'India', lat: 20.5937, lng: 78.9629 },
+  { code: 'ca', name: 'Canada', lat: 56.1304, lng: -106.3468 },
+  { code: 'au', name: 'Australia', lat: -25.2744, lng: 133.7751 },
+  { code: 'br', name: 'Brazil', lat: -14.2350, lng: -51.9253 },
+  { code: 'mx', name: 'Mexico', lat: 23.6345, lng: -102.5528 },
+  { code: 'ru', name: 'Russia', lat: 61.524, lng: 105.3188 },
+  { code: 'kr', name: 'South Korea', lat: 35.9078, lng: 127.7669 },
+  { code: 'sg', name: 'Singapore', lat: 1.3521, lng: 103.8198 },
+  { code: 'hk', name: 'Hong Kong', lat: 22.3193, lng: 114.1694 },
+  { code: 'ae', name: 'UAE', lat: 23.4241, lng: 53.8478 },
+  { code: 'sa', name: 'Saudi Arabia', lat: 23.8859, lng: 45.0792 },
+  { code: 'id', name: 'Indonesia', lat: -0.7893, lng: 113.9213 },
+  { code: 'th', name: 'Thailand', lat: 15.8700, lng: 100.9925 },
+  { code: 'my', name: 'Malaysia', lat: 4.2105, lng: 101.6964 },
+  { code: 'ph', name: 'Philippines', lat: 12.8797, lng: 121.7740 },
+  { code: 'vn', name: 'Vietnam', lat: 14.0583, lng: 108.2772 },
+  { code: 'ir', name: 'Iran', lat: 32.4279, lng: 53.6880 },
+  { code: 'tr', name: 'Turkey', lat: 38.9637, lng: 35.2433 },
+  { code: 'ng', name: 'Nigeria', lat: 9.0820, lng: 8.6753 },
+  { code: 'za', name: 'South Africa', lat: -30.5595, lng: 22.9375 },
+  { code: 'eg', name: 'Egypt', lat: 26.8206, lng: 30.8025 },
+  { code: 'il', name: 'Israel', lat: 31.0461, lng: 34.8516 },
+  { code: 'ch', name: 'Switzerland', lat: 46.8182, lng: 8.2275 },
+  { code: 'se', name: 'Sweden', lat: 60.1282, lng: 18.6435 },
+  { code: 'no', name: 'Norway', lat: 60.472, lng: 8.4689 },
+  { code: 'nl', name: 'Netherlands', lat: 52.1326, lng: 5.2913 },
+  { code: 'be', name: 'Belgium', lat: 50.5039, lng: 4.4699 },
+  { code: 'es', name: 'Spain', lat: 40.4637, lng: -3.7492 },
+  { code: 'it', name: 'Italy', lat: 41.8719, lng: 12.5674 },
+  { code: 'gr', name: 'Greece', lat: 39.0742, lng: 21.8243 },
+  { code: 'nz', name: 'New Zealand', lat: -40.9006, lng: 174.8860 },
+  { code: 'ar', name: 'Argentina', lat: -38.4161, lng: -63.6167 },
+  { code: 'cl', name: 'Chile', lat: -35.6751, lng: -71.5430 },
+  { code: 'co', name: 'Colombia', lat: 4.5709, lng: -74.2973 },
+  { code: 'pk', name: 'Pakistan', lat: 30.3753, lng: 69.3451 },
+];
 
 function hasPriority(text: string): boolean {
   return PRIORITY_KEYWORDS.some(k => text.toLowerCase().includes(k));
@@ -28,6 +74,34 @@ async function fetchRSS(url: string): Promise<NewsItem[]> {
     }));
   } catch {
     return [];
+  }
+}
+
+export async function fetchCountryNews(countryCode: string, countryName: string): Promise<NewsItem[]> {
+  try {
+    // Try GNews API first (no auth required for basic use)
+    const res = await fetch(
+      `${GNEWS_API}?q=${encodeURIComponent(countryName)}&lang=en&max=15&sortby=publishedAt`,
+      { headers: { 'Accept': 'application/json' } }
+    );
+
+    if (!res.ok) throw new Error('GNews API unavailable');
+
+    const data = await res.json();
+    if (!data.articles) return [];
+
+    return data.articles.map((article: Record<string, string>) => ({
+      id: makeId(),
+      title: article.title || 'Untitled',
+      summary: article.description || article.content?.slice(0, 200) || '',
+      source: article.source?.name || 'Unknown',
+      url: article.url || '#',
+      timestamp: new Date(article.publishedAt || Date.now()),
+      priority: hasPriority(article.title || '') || hasPriority(article.description || ''),
+    }));
+  } catch {
+    // Fallback to generic world news if country-specific fails
+    return fetchWorldNews();
   }
 }
 

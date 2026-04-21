@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { TrendingUp, TrendingDown, DollarSign, RefreshCw, ExternalLink } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, RefreshCw, ExternalLink, Loader } from 'lucide-react';
 import type { FinanceItem, NewsItem } from '../../types';
 import { fetchCryptoData, fetchFinanceNews } from '../../utils/newsApi';
+import { summarizeNews } from '../../utils/aiSummarize';
 
 interface Props {
   onLog: (msg: string, type?: 'info' | 'warning' | 'success' | 'processing') => void;
+  onSpeak?: (text: string) => void;
+  title?: string;
 }
 
 function formatPrice(n: number): string {
@@ -21,11 +24,13 @@ function formatMarketCap(n: number): string {
   return `$${n.toLocaleString()}`;
 }
 
-export default function FinanceSector({ onLog }: Props) {
+export default function FinanceSector({ onLog, onSpeak, title }: Props) {
   const [crypto, setCrypto] = useState<FinanceItem[]>([]);
   const [news, setNews] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [selectedAsset, setSelectedAsset] = useState<string | null>(null);
+  const [summarizing, setSummarizing] = useState(false);
 
   const load = async () => {
     setRefreshing(true);
@@ -38,7 +43,29 @@ export default function FinanceSector({ onLog }: Props) {
     onLog(`Finance sector: ${c.length} assets, ${n.length} headlines loaded`, 'success');
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [onLog]);
+
+  const handleAssetClick = async (asset: FinanceItem) => {
+    setSelectedAsset(asset.symbol);
+    setSummarizing(true);
+    onLog?.(`Analyzing ${asset.name}...`, 'processing');
+
+    try {
+      const summary = await summarizeNews(
+        `${asset.name} (${asset.symbol})`,
+        `Current price: $${asset.price}. 24h change: ${asset.changePercent > 0 ? '+' : ''}${asset.changePercent.toFixed(2)}%. Market cap: ${asset.marketCap ? `$${(asset.marketCap / 1e9).toFixed(2)}B` : 'N/A'}`,
+        25
+      );
+      setSummarizing(false);
+      onLog?.(`Asset summary prepared`, 'success');
+      if (onSpeak && title) {
+        onSpeak(`${title}, here is the briefing on ${asset.symbol}: ${summary}`);
+      }
+    } catch (err) {
+      setSummarizing(false);
+      onLog?.('Summarization error', 'warning');
+    }
+  };
 
   return (
     <div className="flex h-full gap-4 p-4">
@@ -82,8 +109,12 @@ export default function FinanceSector({ onLog }: Props) {
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: i * 0.04 }}
-                  className="hover:bg-white/5 transition-colors"
-                  style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}
+                  onClick={() => handleAssetClick(asset)}
+                  className="hover:bg-white/5 transition-colors cursor-pointer"
+                  style={{
+                    borderBottom: '1px solid rgba(255,255,255,0.04)',
+                    background: selectedAsset === asset.symbol ? 'rgba(0,255,136,0.08)' : undefined,
+                  }}
                 >
                   <td className="px-3 py-2" style={{ color: 'rgba(150,180,200,0.5)' }}>{i + 1}</td>
                   <td className="px-3 py-2">

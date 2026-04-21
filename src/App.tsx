@@ -4,6 +4,7 @@ import { X, Mic, MicOff, Volume2, VolumeX, ChevronDown } from 'lucide-react';
 import type { SectorId } from './types';
 import { useArchieState } from './hooks/useArchieState';
 import { useVoice } from './hooks/useVoice';
+import { useRateLimit } from './hooks/useRateLimit';
 import GalaxyMap from './components/GalaxyMap';
 import SectorTile from './components/SectorTile';
 import ThinkingTerminal from './components/ThinkingTerminal';
@@ -54,7 +55,7 @@ function SectorPanel({ id, title, onLog, onKeyword, settings, onSettingsUpdate, 
   const renderContent = () => {
     switch (id) {
       case 'world': return <WorldSector onLog={onLog} onSpeak={onSpeak} title={title} />;
-      case 'finance': return <FinanceSector onLog={onLog} />;
+      case 'finance': return <FinanceSector onLog={onLog} onSpeak={onSpeak} title={title} />;
       case 'tech': return <TechSector onLog={onLog} />;
       case 'region': return <RegionSector onLog={onLog} />;
       case 'mainframe': return <MainframeSector title={title} onLog={onLog} onKeyword={onKeyword} onSpeak={onSpeak} />;
@@ -130,6 +131,7 @@ export default function App() {
 
   const [booting, setBooting] = useState(true);
   const [voiceRef, setVoiceRef] = useState<{ speak: (t: string) => void } | null>(null);
+  const { remaining } = useRateLimit();
 
   const handleTranscript = useCallback((text: string) => {
     addLog(`Voice input: "${text.slice(0, 50)}"`, 'info');
@@ -303,8 +305,13 @@ export default function App() {
 
             <button
               onClick={() => updateSettings({ listeningEnabled: !settings.listeningEnabled })}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-all"
-              style={settings.listeningEnabled ? {
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono transition-all relative"
+              style={voice.isListening ? {
+                background: 'rgba(255,30,30,0.18)',
+                border: '1px solid rgba(255,30,30,0.5)',
+                color: '#ff3333',
+                boxShadow: `0 0 ${8 + voice.recordingLevel * 16}px rgba(255,30,30,${0.3 + voice.recordingLevel * 0.4})`,
+              } : settings.listeningEnabled ? {
                 background: 'rgba(157,80,187,0.18)',
                 border: '1px solid rgba(157,80,187,0.45)',
                 color: '#9d50bb',
@@ -315,10 +322,21 @@ export default function App() {
                 color: 'rgba(150,170,190,0.5)',
               }}
             >
-              {settings.listeningEnabled
-                ? <><Mic size={11} /><span>LISTENING</span></>
-                : <><MicOff size={11} /><span>MIC OFF</span></>
-              }
+              {voice.isListening ? (
+                <>
+                  <motion.div
+                    animate={{ scale: [1, 1.2, 1] }}
+                    transition={{ duration: 0.6, repeat: Infinity }}
+                    className="w-2 h-2 rounded-full"
+                    style={{ background: '#ff3333', boxShadow: '0 0 8px #ff3333' }}
+                  />
+                  <span>LISTENING</span>
+                </>
+              ) : settings.listeningEnabled ? (
+                <><Mic size={11} /><span>LISTENING</span></>
+              ) : (
+                <><MicOff size={11} /><span>MIC OFF</span></>
+              )}
             </button>
 
             <button
@@ -383,24 +401,44 @@ export default function App() {
 
             {/* Status strip */}
             <div
-              className="rounded-xl px-4 py-2.5 flex items-center gap-4 shrink-0"
+              className="rounded-xl px-4 py-3 flex flex-col gap-2 shrink-0"
               style={{ background: 'rgba(0,5,15,0.7)', border: '1px solid rgba(0,210,255,0.07)' }}
             >
-              <span className="text-xs font-mono shrink-0" style={{ color: 'rgba(0,210,255,0.4)', fontSize: '9px', letterSpacing: '0.1em' }}>
-                SYS STATUS
-              </span>
-              <div className="flex-1 grid grid-cols-4 gap-2">
-                {[
-                  { k: 'VOICE', v: settings.voiceEnabled ? 'ON' : 'OFF', c: settings.voiceEnabled ? '#00d2ff' : '#444' },
-                  { k: 'STT', v: settings.listeningEnabled ? 'LIVE' : 'IDLE', c: settings.listeningEnabled ? '#9d50bb' : '#444' },
-                  { k: 'NODES', v: String(galaxyNodes.length), c: '#00ff88' },
-                  { k: 'MODE', v: settings.gender === 'sir' ? 'SIR' : 'MAAM', c: '#ffaa00' },
-                ].map(({ k, v, c }) => (
-                  <div key={k} className="text-center">
-                    <div className="font-mono" style={{ color: 'rgba(150,170,190,0.35)', fontSize: '8px' }}>{k}</div>
-                    <div className="text-xs font-mono font-bold" style={{ color: c }}>{v}</div>
-                  </div>
-                ))}
+              <div className="flex items-center gap-4">
+                <span className="text-xs font-mono shrink-0" style={{ color: 'rgba(0,210,255,0.4)', fontSize: '9px', letterSpacing: '0.1em' }}>
+                  SYS STATUS
+                </span>
+                <div className="flex-1 grid grid-cols-4 gap-2">
+                  {[
+                    { k: 'VOICE', v: settings.voiceEnabled ? 'ON' : 'OFF', c: settings.voiceEnabled ? '#00d2ff' : '#444' },
+                    { k: 'STT', v: voice.isListening ? 'REC' : settings.listeningEnabled ? 'LIVE' : 'IDLE', c: voice.isListening ? '#ff3333' : settings.listeningEnabled ? '#9d50bb' : '#444' },
+                    { k: 'NODES', v: String(galaxyNodes.length), c: '#00ff88' },
+                    { k: 'MODE', v: settings.gender === 'sir' ? 'SIR' : 'MAAM', c: '#ffaa00' },
+                  ].map(({ k, v, c }) => (
+                    <div key={k} className="text-center">
+                      <div className="font-mono" style={{ color: 'rgba(150,170,190,0.35)', fontSize: '8px' }}>{k}</div>
+                      <div className="text-xs font-mono font-bold" style={{ color: c }}>{v}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* Rate limit progress bar */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-mono shrink-0" style={{ color: 'rgba(0,210,255,0.4)', fontSize: '9px' }}>API</span>
+                <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: 'rgba(0,210,255,0.1)', border: '1px solid rgba(0,210,255,0.15)' }}>
+                  <motion.div
+                    animate={{ width: `${(remaining || 0) * 100 / 15}%` }}
+                    transition={{ duration: 0.3 }}
+                    className="h-full rounded-full"
+                    style={{
+                      background: remaining === 0 ? 'rgba(255,50,50,0.7)' : remaining < 3 ? 'rgba(255,170,0,0.7)' : 'linear-gradient(90deg, #00d2ff 0%, #9d50bb 100%)',
+                      boxShadow: remaining === 0 ? '0 0 6px rgba(255,50,50,0.5)' : 'none',
+                    }}
+                  />
+                </div>
+                <span className="text-xs font-mono shrink-0" style={{ color: remaining === 0 ? '#ff5555' : remaining < 3 ? '#ffaa00' : '#00d2ff' }}>
+                  {remaining}/{15}
+                </span>
               </div>
             </div>
           </div>
