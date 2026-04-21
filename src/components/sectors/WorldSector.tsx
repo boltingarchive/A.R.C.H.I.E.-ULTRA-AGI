@@ -42,23 +42,10 @@ export default function WorldSector({ onLog, onSpeak, title }: Props) {
   const animRef = useRef<number>(0);
   const rotRef = useRef(0);
 
-  // Initialize Puter.js
+  // Initialize World Intelligence API status
   useEffect(() => {
-    const existing = document.getElementById('puter-sdk-world');
-    if (!existing) {
-      const script = document.createElement('script');
-      script.id = 'puter-sdk-world';
-      script.src = 'https://js.puter.com/v2/';
-      script.async = true;
-      script.onload = () => {
-        setPuterReady(true);
-        onLog('Puter.js AI module loaded', 'success');
-      };
-      script.onerror = () => onLog('Puter.js load failed', 'warning');
-      document.head.appendChild(script);
-    } else if (window.puter) {
-      setPuterReady(true);
-    }
+    setPuterReady(true);
+    onLog('World Intelligence API initialized', 'success');
   }, [onLog]);
 
   // Load world news on mount
@@ -115,39 +102,53 @@ export default function WorldSector({ onLog, onSpeak, title }: Props) {
     const query = input.trim();
     setInput('');
     setIsTyping(true);
-    onLog(`Processing query: "${query.slice(0, 50)}..."`, 'processing');
+    onLog(`Processing global intelligence request: "${query.slice(0, 50)}..."`, 'processing');
 
     try {
-      let responseText = '';
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-      if (puterReady && window.puter?.ai?.chat) {
-        const systemPrompt = `You are A.R.C.H.I.E. analyzing global intelligence and world news. Address the user as "${title}". Provide concise, insightful analysis.`;
-        const result = await window.puter.ai.chat(`${systemPrompt}\n\nUser: ${query}`);
-
-        if (typeof result === 'string') responseText = result;
-        else if (result?.message?.content) responseText = result.message.content;
-        else responseText = String(result);
-      } else {
-        responseText = `Analyzing your query: "${query}". A.R.C.H.I.E. is operating in analytical reasoning mode. ${puterReady ? 'AI module ready.' : 'AI module initializing...'}`;
+      if (!supabaseUrl || !anonKey) {
+        throw new Error('Supabase configuration missing');
       }
+
+      const response = await fetch(
+        `${supabaseUrl}/functions/v1/world-intelligence`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${anonKey}`,
+            'Content-Type': 'application/json',
+            'X-Client-Info': 'archie/1.0',
+          },
+          body: JSON.stringify({ query }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`API responded with ${response.status}`);
+      }
+
+      const data = await response.json();
+      const responseText = data.response || 'Unable to process query at this time.';
 
       const assistantMsg: MainframeMessage = {
         id: makeId(), role: 'assistant', content: responseText, timestamp: new Date(),
       };
       setMessages(prev => [...prev, assistantMsg]);
-      onLog(`Query processed`, 'success');
+      onLog(`Intelligence analysis completed`, 'success');
 
       if (responseText.length > 0) {
-        onSpeak(responseText.slice(0, 300));
+        onSpeak(`Certainly, here is the global intelligence briefing: ${responseText.slice(0, 280)}`);
       }
     } catch (err) {
       const errMsg: MainframeMessage = {
         id: makeId(), role: 'assistant',
-        content: `Error processing query, ${title}: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        content: `Intelligence processing unavailable, ${title}. Error: ${err instanceof Error ? err.message : 'Unknown error'}. Please check your connection and try again.`,
         timestamp: new Date(),
       };
       setMessages(prev => [...prev, errMsg]);
-      onLog('World AI error', 'warning');
+      onLog('World intelligence error', 'warning');
     } finally {
       setIsTyping(false);
     }
