@@ -13,55 +13,97 @@ export function useVoice(settings: ArchieSettings, onTranscript: (text: string) 
   const [transcript, setTranscript] = useState('');
   const [isSpeaking, setIsSpeaking] = useState(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const restartTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const SpeechRecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
   const supported = !!SpeechRecognitionClass;
 
+  const restartListening = useCallback(() => {
+    if (!recognitionRef.current || !settings.listeningEnabled) return;
+    try {
+      recognitionRef.current.start();
+      setIsListening(true);
+    } catch (e) {
+      if ((e as Error).message?.includes('already started')) {
+        setIsListening(true);
+      }
+    }
+  }, [settings.listeningEnabled]);
+
   useEffect(() => {
-    if (!supported || !settings.listeningEnabled) return;
+    if (!supported) return;
 
     const recognition = new SpeechRecognitionClass();
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = 'en-US';
+    recognition.maxAlternatives = 1;
 
-    recognition.onresult = (e: SpeechRecognitionEvent) => {
-      const current = e.results[e.results.length - 1];
-      const text = current[0].transcript;
-      setTranscript(text);
-      if (current.isFinal && text.trim()) {
-        onTranscript(text.trim());
-        setTranscript('');
-      }
+    recognition.onstart = () => {
+      setIsListening(true);
+      if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
     };
 
-    recognition.onerror = () => setIsListening(false);
+    recognition.onresult = (e: SpeechRecognitionEvent) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const transcript = e.results[i][0].transcript;
+        if (e.results[i].isFinal) {
+          if (transcript.trim()) {
+            onTranscript(transcript.trim());
+          }
+        } else {
+          interim += transcript + ' ';
+        }
+      }
+      setTranscript(interim.trim());
+    };
+
+    recognition.onerror = (e: SpeechRecognitionEvent) => {
+      if (e.error !== 'no-speech') {
+        console.error('Speech recognition error:', e.error);
+      }
+      setIsListening(false);
+    };
+
     recognition.onend = () => {
       if (settings.listeningEnabled) {
-        try { recognition.start(); } catch { /* already started */ }
+        restartTimeoutRef.current = setTimeout(() => {
+          restartListening();
+        }, 300);
       } else {
         setIsListening(false);
       }
     };
 
     recognitionRef.current = recognition;
-    try {
-      recognition.start();
-      setIsListening(true);
-    } catch { /* ignore */ }
+
+    if (settings.listeningEnabled) {
+      try {
+        recognition.start();
+        setIsListening(true);
+      } catch (e) {
+        if (!(e as Error).message?.includes('already started')) {
+          setIsListening(false);
+        }
+      }
+    }
 
     return () => {
+      if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
       recognition.abort();
       setIsListening(false);
     };
-  }, [settings.listeningEnabled, supported]);
+  }, [settings.listeningEnabled, supported, restartListening]);
 
   const speak = useCallback((text: string) => {
     if (!settings.voiceEnabled || !('speechSynthesis' in window)) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = settings.voiceSpeed;
-    utterance.pitch = settings.voicePitch;
+    utterance.rate = Math.max(0.5, Math.min(2, settings.voiceSpeed));
+    utterance.pitch = Math.max(0.5, Math.min(2, settings.voicePitch));
+    utterance.volume = 1;
+    utterance.lang = 'en-US';
     utterance.onstart = () => setIsSpeaking(true);
     utterance.onend = () => setIsSpeaking(false);
     utterance.onerror = () => setIsSpeaking(false);
@@ -69,7 +111,9 @@ export function useVoice(settings: ArchieSettings, onTranscript: (text: string) 
   }, [settings.voiceEnabled, settings.voiceSpeed, settings.voicePitch]);
 
   const stopSpeaking = useCallback(() => {
-    window.speechSynthesis?.cancel();
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
     setIsSpeaking(false);
   }, []);
 

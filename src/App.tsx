@@ -47,16 +47,17 @@ interface SectorPanelProps {
   settings: ReturnType<typeof useArchieState>['settings'];
   onSettingsUpdate: ReturnType<typeof useArchieState>['updateSettings'];
   onClose: () => void;
+  onSpeak?: (text: string) => void;
 }
 
-function SectorPanel({ id, title, onLog, onKeyword, settings, onSettingsUpdate, onClose }: SectorPanelProps) {
+function SectorPanel({ id, title, onLog, onKeyword, settings, onSettingsUpdate, onClose, onSpeak }: SectorPanelProps & { onSpeak: (t: string) => void }) {
   const renderContent = () => {
     switch (id) {
-      case 'world': return <WorldSector onLog={onLog} />;
+      case 'world': return <WorldSector onLog={onLog} onSpeak={onSpeak} title={title} />;
       case 'finance': return <FinanceSector onLog={onLog} />;
       case 'tech': return <TechSector onLog={onLog} />;
       case 'region': return <RegionSector onLog={onLog} />;
-      case 'mainframe': return <MainframeSector title={title} onLog={onLog} onKeyword={onKeyword} />;
+      case 'mainframe': return <MainframeSector title={title} onLog={onLog} onKeyword={onKeyword} onSpeak={onSpeak} />;
       case 'settings': return <SettingsSector settings={settings} onUpdate={onSettingsUpdate} onLog={onLog} />;
     }
   };
@@ -137,7 +138,10 @@ export default function App() {
     const genderChange = detectGenderChange(text);
     if (genderChange) {
       updateSettings({ gender: genderChange });
-      addLog(`Protocol updated: ${genderChange === 'sir' ? 'Sir' : "Ma'am"} mode activated`, 'success');
+      const newTitle = genderChange === 'sir' ? 'Sir' : "Ma'am";
+      addLog(`Protocol updated: ${newTitle} mode activated`, 'success');
+      voiceRef?.speak(`Understood. Protocol updated to ${newTitle}.`);
+      return;
     }
 
     const sector = processVoiceCommand(text);
@@ -145,10 +149,11 @@ export default function App() {
       setActiveSector(sector);
       addLog(`Navigating to ${sector} sector`, 'success');
       voiceRef?.speak(`Certainly, ${title}. Opening the ${sector} sector now.`);
+      return;
     }
 
     checkPriorityKeywords(text, keyword => {
-      voiceRef?.speak(`PRIORITY ALERT, ${title}! ${keyword} detected in incoming data. Immediate attention required.`);
+      voiceRef?.speak(`PRIORITY ALERT, ${title}! ${keyword.toUpperCase()} detected. Immediate attention required.`);
       addLog(`PRIORITY ALERT: ${keyword} detected`, 'warning');
     });
   }, [addGalaxyKeywords, detectGenderChange, updateSettings, processVoiceCommand, setActiveSector, checkPriorityKeywords, title, addLog, voiceRef]);
@@ -163,12 +168,14 @@ export default function App() {
     const timer = setTimeout(() => {
       setBooting(false);
       addLog(`Dashboard online. Welcome, ${title}.`, 'success');
-      if (settings.voiceEnabled) {
-        setTimeout(() => voice.speak(`Good day, ${title}. A.R.C.H.I.E. is fully operational and at your service.`), 600);
-      }
+      setTimeout(() => {
+        if (settings.voiceEnabled && voiceRef) {
+          voiceRef.speak(`Good day, ${title}. A.R.C.H.I.E. is fully operational and at your service.`);
+        }
+      }, 600);
     }, 2200);
     return () => clearTimeout(timer);
-  }, []);
+  }, [title, settings.voiceEnabled, voiceRef, addLog]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -436,6 +443,7 @@ export default function App() {
             settings={settings}
             onSettingsUpdate={updateSettings}
             onClose={() => setActiveSector(null)}
+            onSpeak={voice.speak}
           />
         )}
       </AnimatePresence>

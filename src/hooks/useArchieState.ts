@@ -46,6 +46,17 @@ export function useArchieState() {
 
   const title = settings.gender === 'maam' ? 'Ma\'am' : 'Sir';
 
+  const acknowledge = useCallback((action?: string) => {
+    const acknowledgements = [
+      `Certainly, ${title}.`,
+      `At your service, ${title}.`,
+      `Task initialized, ${title}.`,
+      `Understood, ${title}. Proceeding now.`,
+      `Affirmative, ${title}.`,
+    ];
+    return acknowledgements[Math.floor(Math.random() * acknowledgements.length)] + (action ? ` ${action}` : '');
+  }, [title]);
+
   const addLog = useCallback((message: string, type: LogEntry['type'] = 'info') => {
     setLogs(prev => [
       { id: makeId(), message, timestamp: new Date(), type },
@@ -121,5 +132,6 @@ export function useArchieState() {
     checkPriorityKeywords,
     processVoiceCommand,
     detectGenderChange,
+    acknowledge,
   };
 }

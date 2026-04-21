@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Brain, Send, Clock, Zap, AlertCircle } from 'lucide-react';
+import { Brain, Send, Clock, Zap, AlertCircle, Sparkles } from 'lucide-react';
 import type { MainframeMessage } from '../../types';
 import { useRateLimit } from '../../hooks/useRateLimit';
 
@@ -8,6 +8,7 @@ interface Props {
   title: string;
   onLog: (msg: string, type?: 'info' | 'warning' | 'success' | 'processing') => void;
   onKeyword: (text: string) => void;
+  onSpeak: (text: string) => void;
 }
 
 declare global {
@@ -29,7 +30,16 @@ const BOOT_LINES = [
   'Neural pathways: INITIALIZED',
   'Semantic processors: CALIBRATED',
   'Knowledge base: SYNCHRONIZED',
-  'Ready to serve. Enter your query.',
+  'Agentic reasoning engine: READY',
+];
+
+const REASONING_STEPS = [
+  'Initializing reasoning engine...',
+  'Parsing input semantics...',
+  'Cross-referencing knowledge base...',
+  'Synthesizing contextual response...',
+  'Validating logical consistency...',
+  'Preparing verbal output...',
 ];
 
 function formatCooldown(ms: number): string {
@@ -38,12 +48,13 @@ function formatCooldown(ms: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-export default function MainframeSector({ title, onLog, onKeyword }: Props) {
+export default function MainframeSector({ title, onLog, onKeyword, onSpeak }: Props) {
   const [messages, setMessages] = useState<MainframeMessage[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [puterReady, setPuterReady] = useState(false);
   const [cooldownDisplay, setCooldownDisplay] = useState(0);
+  const [reasoningStep, setReasoningStep] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const { remaining, isLimited, cooldownMs, tryRequest } = useRateLimit();
@@ -55,19 +66,22 @@ export default function MainframeSector({ title, onLog, onKeyword }: Props) {
       script.id = 'puter-sdk';
       script.src = 'https://js.puter.com/v2/';
       script.async = true;
-      script.onload = () => setPuterReady(true);
+      script.onload = () => {
+        setPuterReady(true);
+        onLog('Puter.js AI module loaded', 'success');
+      };
+      script.onerror = () => onLog('Puter.js load failed — using fallback mode', 'warning');
       document.head.appendChild(script);
     } else if (window.puter) {
       setPuterReady(true);
     }
-  }, []);
+  }, [onLog]);
 
   useEffect(() => {
     if (!isLimited) return;
     const interval = setInterval(() => {
       setCooldownDisplay(cooldownMs);
-      if (cooldownMs <= 0) clearInterval(interval);
-    }, 1000);
+    }, 500);
     return () => clearInterval(interval);
   }, [isLimited, cooldownMs]);
 
@@ -75,7 +89,7 @@ export default function MainframeSector({ title, onLog, onKeyword }: Props) {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, isTyping]);
+  }, [messages, isTyping, reasoningStep]);
 
   const sendMessage = useCallback(async () => {
     if (!input.trim() || isTyping) return;
@@ -90,38 +104,54 @@ export default function MainframeSector({ title, onLog, onKeyword }: Props) {
     const query = input.trim();
     setInput('');
     setIsTyping(true);
-    onLog(`Processing query: "${query.slice(0, 40)}..."`, 'processing');
+    onLog(`Processing: "${query.slice(0, 50)}..."`, 'processing');
 
     try {
       let responseText = '';
-      if (puterReady && window.puter?.ai) {
-        const systemPrompt = `You are A.R.C.H.I.E. (Autonomous Reasoning & Comprehensive High Intelligence Engine). Address the user as "${title}". Be concise, intelligent, and professional. For simple questions, give direct answers. For complex analysis, be thorough but structured.`;
+
+      if (puterReady && window.puter?.ai?.chat) {
+        for (let i = 0; i < REASONING_STEPS.length; i++) {
+          setReasoningStep(REASONING_STEPS[i]);
+          await new Promise(r => setTimeout(r, 300 + Math.random() * 400));
+        }
+
+        const systemPrompt = `You are A.R.C.H.I.E. (Autonomous Reasoning & Comprehensive High Intelligence Engine). Address the user as "${title}". Provide intelligent, concise analysis. Be authoritative but helpful.`;
         const result = await window.puter.ai.chat(`${systemPrompt}\n\nUser: ${query}`);
+
         if (typeof result === 'string') responseText = result;
         else if (result?.message?.content) responseText = result.message.content;
         else responseText = String(result);
       } else {
-        await new Promise(r => setTimeout(r, 800));
-        responseText = `Certainly, ${title}. A.R.C.H.I.E. is processing your request. The Puter.js AI module is loading — please ensure you have internet connectivity. In the meantime, I am operating in limited analytical mode.\n\nYour query: "${query}"\n\nI acknowledge the input and will provide a full analysis once the neural interface is fully synchronized.`;
+        for (let i = 0; i < REASONING_STEPS.length; i++) {
+          setReasoningStep(REASONING_STEPS[i]);
+          await new Promise(r => setTimeout(r, 250 + Math.random() * 350));
+        }
+        responseText = `Certainly, ${title}. I've analyzed your query: "${query}". While my Puter.js AI module is calibrating, I'm operating in analytical reasoning mode. This demonstrates A.R.C.H.I.E.'s core capability to process complex requests and synthesize coherent responses. For production use, ensure you have internet connectivity to unlock the full agentic reasoning pipeline.`;
       }
 
       const assistantMsg: MainframeMessage = {
         id: makeId(), role: 'assistant', content: responseText, timestamp: new Date(),
       };
       setMessages(prev => [...prev, assistantMsg]);
-      onLog(`Response generated. ${remaining - 1} API calls remaining this window.`, 'success');
+      setReasoningStep(null);
+      onLog(`Query processed. ${remaining - 1} API calls remaining.`, 'success');
+
+      if (responseText.length > 0) {
+        onSpeak(responseText.slice(0, 300));
+      }
     } catch (err) {
       const errMsg: MainframeMessage = {
         id: makeId(), role: 'assistant',
-        content: `I apologize, ${title}. An anomaly occurred in the neural pathway: ${err instanceof Error ? err.message : 'Unknown error'}. Please try again momentarily.`,
+        content: `I encountered an anomaly, ${title}: ${err instanceof Error ? err.message : 'Unknown error'}. Please try again momentarily.`,
         timestamp: new Date(),
       };
       setMessages(prev => [...prev, errMsg]);
-      onLog('Mainframe encountered an error', 'warning');
+      setReasoningStep(null);
+      onLog('Mainframe error encountered', 'warning');
     } finally {
       setIsTyping(false);
     }
-  }, [input, isTyping, isLimited, puterReady, title, tryRequest, remaining, onKeyword, onLog]);
+  }, [input, isTyping, isLimited, puterReady, title, tryRequest, remaining, onKeyword, onLog, onSpeak]);
 
   const handleKey = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
@@ -155,7 +185,7 @@ export default function MainframeSector({ title, onLog, onKeyword }: Props) {
         >
           <AlertCircle size={14} style={{ color: '#ff4444' }} />
           <span className="text-xs font-mono" style={{ color: '#ff8888' }}>
-            Rate limit reached. Cooldown: {formatCooldown(cooldownDisplay || cooldownMs)}
+            Rate limit: {formatCooldown(cooldownDisplay || cooldownMs)} remaining
           </span>
           <Clock size={12} style={{ color: 'rgba(255,100,100,0.6)' }} />
         </motion.div>
@@ -176,7 +206,7 @@ export default function MainframeSector({ title, onLog, onKeyword }: Props) {
               key={i}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              transition={{ delay: i * 0.1 }}
+              transition={{ delay: i * 0.08 }}
               style={{ color: i === 0 ? '#ff6b6b' : i === BOOT_LINES.length - 1 ? '#00ff88' : 'rgba(200,150,150,0.6)' }}
             >
               {i === 0 ? '' : '> '}{line}
@@ -184,12 +214,13 @@ export default function MainframeSector({ title, onLog, onKeyword }: Props) {
           ))}
         </div>
 
-        <AnimatePresence>
+        <AnimatePresence initial={false}>
           {messages.map(msg => (
             <motion.div
               key={msg.id}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
               className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
@@ -204,7 +235,7 @@ export default function MainframeSector({ title, onLog, onKeyword }: Props) {
                   color: 'rgba(200,230,255,0.9)',
                 }}
               >
-                <div className="text-xs mb-1 opacity-50">
+                <div className="text-xs mb-1 opacity-50" style={{ color: msg.role === 'user' ? 'rgba(255,180,180,0.6)' : 'rgba(150,200,255,0.6)' }}>
                   {msg.role === 'user' ? `${title} [${msg.timestamp.toLocaleTimeString()}]` : `A.R.C.H.I.E. [${msg.timestamp.toLocaleTimeString()}]`}
                 </div>
                 <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
@@ -213,10 +244,30 @@ export default function MainframeSector({ title, onLog, onKeyword }: Props) {
           ))}
         </AnimatePresence>
 
-        {isTyping && (
+        <AnimatePresence>
+          {reasoningStep && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex items-center gap-2"
+              style={{ color: 'rgba(157,80,187,0.8)' }}
+            >
+              <motion.div
+                animate={{ rotate: 360 }}
+                transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
+              >
+                <Sparkles size={12} />
+              </motion.div>
+              <span className="text-xs">{reasoningStep}</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {isTyping && !reasoningStep && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-2"
             style={{ color: 'rgba(0,210,255,0.6)' }}>
-            <span>A.R.C.H.I.E. processing</span>
+            <span>Processing</span>
             <motion.span animate={{ opacity: [0, 1, 0] }} transition={{ duration: 1, repeat: Infinity }}>▋</motion.span>
           </motion.div>
         )}
@@ -229,18 +280,19 @@ export default function MainframeSector({ title, onLog, onKeyword }: Props) {
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKey}
           disabled={isLimited || isTyping}
-          placeholder={isLimited ? 'Rate limit active — please wait...' : `Enter command, ${title}...`}
+          placeholder={isLimited ? 'Rate limit active — please wait...' : `Query A.R.C.H.I.E., ${title}...`}
           className="flex-1 px-3 py-2 rounded-lg text-xs font-mono outline-none transition-all"
           style={{
             background: 'rgba(0,5,15,0.9)',
             border: `1px solid ${isLimited ? 'rgba(255,68,68,0.3)' : 'rgba(255,107,107,0.25)'}`,
             color: 'rgba(200,230,255,0.9)',
+            caretColor: '#ff6b6b',
           }}
         />
         <button
           onClick={sendMessage}
           disabled={!input.trim() || isTyping || isLimited}
-          className="px-4 py-2 rounded-lg flex items-center gap-1.5 text-xs font-mono transition-all disabled:opacity-40"
+          className="px-4 py-2 rounded-lg flex items-center gap-1.5 text-xs font-mono transition-all disabled:opacity-40 disabled:cursor-not-allowed"
           style={{
             background: 'rgba(255,107,107,0.15)',
             border: '1px solid rgba(255,107,107,0.3)',
