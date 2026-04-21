@@ -1,14 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Globe, ExternalLink, Radio, Loader, MapPin } from 'lucide-react';
-import type { NewsItem } from '../../types';
+import { Globe, ExternalLink, Radio, Loader, MapPin, Send, Brain } from 'lucide-react';
+import type { NewsItem, MainframeMessage } from '../../types';
 import { fetchCountryNews, fetchWorldNews, MAJOR_NATIONS } from '../../utils/newsApi';
 import { summarizeNews } from '../../utils/aiSummarize';
+
+declare global {
+  interface Window {
+    puter?: {
+      ai?: {
+        chat: (msg: string, opts?: { model?: string }) => Promise<string | { message?: { content?: string } }>;
+      };
+    };
+  }
+}
 
 interface Props {
   onLog: (msg: string, type?: 'info' | 'warning' | 'success' | 'processing') => void;
   onSpeak: (text: string) => void;
   title: string;
+}
+
+function makeId() {
+  return Math.random().toString(36).slice(2);
 }
 
 export default function WorldSector({ onLog, onSpeak, title }: Props) {
@@ -18,9 +32,34 @@ export default function WorldSector({ onLog, onSpeak, title }: Props) {
   const [selectedCountry, setSelectedCountry] = useState<typeof MAJOR_NATIONS[0] | null>(null);
   const [summarizing, setSummarizing] = useState(false);
   const [hoveredNation, setHoveredNation] = useState<string | null>(null);
+  const [messages, setMessages] = useState<MainframeMessage[]>([]);
+  const [input, setInput] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const [puterReady, setPuterReady] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
   const rotRef = useRef(0);
+
+  // Initialize Puter.js
+  useEffect(() => {
+    const existing = document.getElementById('puter-sdk-world');
+    if (!existing) {
+      const script = document.createElement('script');
+      script.id = 'puter-sdk-world';
+      script.src = 'https://js.puter.com/v2/';
+      script.async = true;
+      script.onload = () => {
+        setPuterReady(true);
+        onLog('Puter.js AI module loaded', 'success');
+      };
+      script.onerror = () => onLog('Puter.js load failed', 'warning');
+      document.head.appendChild(script);
+    } else if (window.puter) {
+      setPuterReady(true);
+    }
+  }, [onLog]);
 
   // Load world news on mount
   useEffect(() => {
@@ -65,6 +104,64 @@ export default function WorldSector({ onLog, onSpeak, title }: Props) {
       onLog('Summarization error', 'warning');
     }
   };
+
+  const sendMessage = async () => {
+    if (!input.trim() || isTyping) return;
+
+    const userMsg: MainframeMessage = {
+      id: makeId(), role: 'user', content: input.trim(), timestamp: new Date(),
+    };
+    setMessages(prev => [...prev, userMsg]);
+    const query = input.trim();
+    setInput('');
+    setIsTyping(true);
+    onLog(`Processing query: "${query.slice(0, 50)}..."`, 'processing');
+
+    try {
+      let responseText = '';
+
+      if (puterReady && window.puter?.ai?.chat) {
+        const systemPrompt = `You are A.R.C.H.I.E. analyzing global intelligence and world news. Address the user as "${title}". Provide concise, insightful analysis.`;
+        const result = await window.puter.ai.chat(`${systemPrompt}\n\nUser: ${query}`);
+
+        if (typeof result === 'string') responseText = result;
+        else if (result?.message?.content) responseText = result.message.content;
+        else responseText = String(result);
+      } else {
+        responseText = `Analyzing your query: "${query}". A.R.C.H.I.E. is operating in analytical reasoning mode. ${puterReady ? 'AI module ready.' : 'AI module initializing...'}`;
+      }
+
+      const assistantMsg: MainframeMessage = {
+        id: makeId(), role: 'assistant', content: responseText, timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, assistantMsg]);
+      onLog(`Query processed`, 'success');
+
+      if (responseText.length > 0) {
+        onSpeak(responseText.slice(0, 300));
+      }
+    } catch (err) {
+      const errMsg: MainframeMessage = {
+        id: makeId(), role: 'assistant',
+        content: `Error processing query, ${title}: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, errMsg]);
+      onLog('World AI error', 'warning');
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  const handleKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  };
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
 
   // Canvas globe animation
   useEffect(() => {
@@ -172,13 +269,13 @@ export default function WorldSector({ onLog, onSpeak, title }: Props) {
   }, [selectedCountry]);
 
   return (
-    <div className="flex h-full gap-4 p-4 flex-col lg:flex-row">
-      {/* Left: News Feed */}
-      <div className="flex-1 flex flex-col min-h-0">
-        <div className="flex items-center gap-2 mb-3">
+    <div className="flex h-full gap-4 p-4 flex-col">
+      {/* Top: News Headlines - Elevated */}
+      <div className="h-1/3 flex flex-col min-h-0 rounded-xl p-4" style={{ background: 'rgba(0,210,255,0.04)', border: '1px solid rgba(0,210,255,0.1)' }}>
+        <div className="flex items-center gap-2 mb-2">
           <Globe size={16} style={{ color: '#00d2ff' }} />
           <span className="font-mono text-sm font-bold" style={{ color: '#00d2ff' }}>
-            {selectedCountry ? selectedCountry.name.toUpperCase() : 'GLOBAL INTELLIGENCE'}
+            {selectedCountry ? selectedCountry.name.toUpperCase() : 'GLOBAL HEADLINES'}
           </span>
           <motion.div
             animate={{ opacity: [1, 0.3, 1] }}
@@ -190,17 +287,17 @@ export default function WorldSector({ onLog, onSpeak, title }: Props) {
           </motion.div>
         </div>
 
-        {/* Nation Selector */}
-        <div className="mb-3 p-2 rounded-lg" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(0,210,255,0.08)' }}>
-          <div className="text-xs font-mono mb-2" style={{ color: 'rgba(0,210,255,0.5)' }}>SELECT NATION</div>
-          <div className="grid grid-cols-3 sm:grid-cols-5 gap-1">
+        {/* Nation Selector - Compact */}
+        <div className="mb-2 p-1.5 rounded-lg" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(0,210,255,0.08)' }}>
+          <div className="text-xs font-mono mb-1" style={{ color: 'rgba(0,210,255,0.5)' }}>SELECT NATION</div>
+          <div className="grid grid-cols-4 sm:grid-cols-8 gap-0.5 max-h-12 overflow-y-auto">
             {MAJOR_NATIONS.map(nation => (
               <button
                 key={nation.code}
                 onMouseEnter={() => setHoveredNation(nation.code)}
                 onMouseLeave={() => setHoveredNation(null)}
                 onClick={() => handleCountrySelect(nation)}
-                className="px-2 py-1 rounded text-xs font-mono transition-all"
+                className="px-1.5 py-0.5 rounded text-xs font-mono transition-all"
                 style={{
                   background: selectedCountry?.code === nation.code
                     ? 'rgba(0,210,255,0.25)'
@@ -209,6 +306,7 @@ export default function WorldSector({ onLog, onSpeak, title }: Props) {
                     : 'rgba(255,255,255,0.05)',
                   color: selectedCountry?.code === nation.code ? '#00d2ff' : 'rgba(200,220,240,0.6)',
                   border: `1px solid ${selectedCountry?.code === nation.code ? 'rgba(0,210,255,0.4)' : 'rgba(0,210,255,0.1)'}`,
+                  fontSize: '10px',
                 }}
               >
                 {nation.code.toUpperCase()}
@@ -217,7 +315,7 @@ export default function WorldSector({ onLog, onSpeak, title }: Props) {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto space-y-2 pr-1" style={{ scrollbarWidth: 'thin' }}>
+        <div className="flex-1 overflow-y-auto space-y-1 pr-1" style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(0,210,255,0.4) rgba(0,5,15,0.5)' }}>
           {loading ? (
             Array.from({ length: 8 }).map((_, i) => (
               <motion.div
@@ -229,57 +327,34 @@ export default function WorldSector({ onLog, onSpeak, title }: Props) {
               />
             ))
           ) : (
-            news.map(item => (
+            news.slice(0, 6).map((item, idx) => (
               <motion.div
                 key={item.id}
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
-                whileHover={{ x: 4, scale: 1.01 }}
+                transition={{ delay: idx * 0.05 }}
+                whileHover={{ x: 2, scale: 1.005 }}
                 onClick={() => handleNewsClick(item)}
-                className="rounded-lg p-3 cursor-pointer transition-all"
+                className="rounded-lg p-2 cursor-pointer transition-all"
                 style={{
                   background: selected?.id === item.id ? 'rgba(0,210,255,0.15)' : item.priority ? 'rgba(255,30,30,0.08)' : 'rgba(255,255,255,0.04)',
                   border: `1px solid ${selected?.id === item.id ? 'rgba(0,210,255,0.4)' : item.priority ? 'rgba(255,30,30,0.3)' : 'rgba(0,210,255,0.1)'}`,
                 }}
               >
-                <div className="flex items-start gap-2">
+                <div className="flex items-start gap-1.5">
                   {item.priority && (
                     <motion.div
                       animate={{ scale: [1, 1.3, 1] }}
                       transition={{ duration: 1.5, repeat: Infinity }}
-                      className="w-1.5 h-1.5 rounded-full bg-red-500 mt-1.5 shrink-0"
-                      style={{ boxShadow: '0 0 6px #ff3030' }}
+                      className="w-1 h-1 rounded-full bg-red-500 mt-1 shrink-0"
+                      style={{ boxShadow: '0 0 4px #ff3030' }}
                     />
                   )}
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium leading-relaxed" style={{ color: item.priority ? '#ff8888' : 'rgba(200,230,255,0.9)' }}>
-                      {item.title}
+                    <p className="text-xs font-medium leading-tight" style={{ color: item.priority ? '#ff8888' : 'rgba(200,230,255,0.9)' }}>
+                      {item.title.length > 60 ? item.title.slice(0, 60) + '...' : item.title}
                     </p>
-                    {selected?.id === item.id && (
-                      <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}>
-                        <p className="text-xs mt-2 leading-relaxed" style={{ color: 'rgba(150,180,210,0.7)' }}>
-                          {item.summary}
-                        </p>
-                        {summarizing && (
-                          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-1.5 mt-2">
-                            <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity }}>
-                              <Loader size={11} style={{ color: '#00d2ff' }} />
-                            </motion.div>
-                            <span className="text-xs font-mono" style={{ color: 'rgba(0,210,255,0.6)' }}>Summarizing...</span>
-                          </motion.div>
-                        )}
-                        {!summarizing && (
-                          <a href={item.url} target="_blank" rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-xs mt-2"
-                            style={{ color: '#00d2ff' }}
-                            onClick={e => e.stopPropagation()}
-                          >
-                            Read article <ExternalLink size={10} />
-                          </a>
-                        )}
-                      </motion.div>
-                    )}
-                    <div className="flex items-center gap-2 mt-1.5">
+                    <div className="flex items-center gap-1 mt-0.5">
                       <span className="text-xs font-mono" style={{ color: 'rgba(0,210,255,0.5)' }}>{item.source}</span>
                       <span className="text-xs" style={{ color: 'rgba(150,170,190,0.4)' }}>
                         {item.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -293,26 +368,111 @@ export default function WorldSector({ onLog, onSpeak, title }: Props) {
         </div>
       </div>
 
-      {/* Right: Globe */}
-      <div className="w-full lg:w-80 shrink-0 flex flex-col">
-        <div className="rounded-xl overflow-hidden w-full aspect-square"
-          style={{ background: 'rgba(0,5,20,0.8)', border: '1px solid rgba(0,210,255,0.15)' }}
-        >
-          <canvas ref={canvasRef} className="w-full h-full" />
-        </div>
-        {selectedCountry && (
-          <button
-            onClick={() => { setSelectedCountry(null); setNews([]); }}
-            className="mt-2 w-full py-2 rounded-lg text-xs font-mono transition-all"
-            style={{
-              background: 'rgba(255,255,255,0.06)',
-              color: '#00d2ff',
-              border: '1px solid rgba(0,210,255,0.2)',
-            }}
+      {/* Bottom: Mainframe AI + Globe */}
+      <div className="flex-1 flex gap-4 min-h-0 min-w-0">
+        {/* Left: Mainframe Chat */}
+        <div className="flex-1 flex flex-col min-h-0 rounded-xl p-4" style={{ background: 'rgba(255,107,107,0.04)', border: '1px solid rgba(255,107,107,0.1)' }}>
+          <div className="flex items-center gap-2 mb-3">
+            <Brain size={16} style={{ color: '#ff6b6b' }} />
+            <span className="font-mono text-sm font-bold" style={{ color: '#ff6b6b' }}>WORLD AI ANALYSIS</span>
+            <div className={`w-2 h-2 rounded-full ml-auto ${puterReady ? 'bg-green-400' : 'bg-yellow-400'}`}
+              style={{ boxShadow: `0 0 6px ${puterReady ? '#00ff88' : '#ffaa00'}` }}
+            />
+          </div>
+
+          <div
+            ref={scrollRef}
+            className="flex-1 overflow-y-auto space-y-2 mb-3 pr-1"
+            style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(0,210,255,0.4) rgba(0,5,15,0.5)' }}
           >
-            Clear Selection
-          </button>
-        )}
+            {messages.length === 0 ? (
+              <div className="h-full flex items-center justify-center">
+                <p className="text-xs text-center" style={{ color: 'rgba(200,220,240,0.4)' }}>Ask about global trends, news analysis, or geopolitical events</p>
+              </div>
+            ) : (
+              messages.map((msg) => (
+                <motion.div
+                  key={msg.id}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="text-xs leading-relaxed p-2 rounded-lg"
+                  style={{
+                    background: msg.role === 'user' ? 'rgba(0,210,255,0.1)' : 'rgba(255,107,107,0.06)',
+                    color: msg.role === 'user' ? 'rgba(200,230,255,0.9)' : 'rgba(200,220,240,0.85)',
+                  }}
+                >
+                  <span style={{ color: msg.role === 'user' ? '#00d2ff' : '#ff6b6b', fontWeight: 'bold' }}>
+                    {msg.role === 'user' ? 'You' : 'A.R.C.H.I.E.'}:
+                  </span>
+                  <span className="ml-1">{msg.content}</span>
+                </motion.div>
+              ))
+            )}
+            {isTyping && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="text-xs p-2 rounded-lg flex items-center gap-1"
+                style={{ background: 'rgba(255,107,107,0.06)', color: 'rgba(200,220,240,0.6)' }}
+              >
+                <motion.div animate={{ scale: [1, 1.5, 1] }} transition={{ duration: 0.6, repeat: Infinity }}>
+                  <div className="w-1 h-1 rounded-full" style={{ background: '#ff6b6b' }} />
+                </motion.div>
+                Thinking...
+              </motion.div>
+            )}
+          </div>
+
+          <div className="flex gap-2">
+            <input
+              ref={inputRef}
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={handleKey}
+              disabled={isTyping}
+              placeholder="Ask about world news..."
+              className="flex-1 bg-transparent border rounded-lg px-3 py-2 text-xs font-mono placeholder-gray-500"
+              style={{
+                borderColor: 'rgba(255,107,107,0.2)',
+                color: 'rgba(200,230,255,0.9)',
+              }}
+            />
+            <button
+              onClick={sendMessage}
+              disabled={isTyping || !input.trim()}
+              className="p-2 rounded-lg transition-all"
+              style={{
+                background: isTyping || !input.trim() ? 'rgba(255,107,107,0.1)' : 'rgba(255,107,107,0.2)',
+                color: isTyping || !input.trim() ? 'rgba(255,107,107,0.4)' : '#ff6b6b',
+                border: `1px solid ${isTyping || !input.trim() ? 'rgba(255,107,107,0.1)' : 'rgba(255,107,107,0.3)'}`,
+              }}
+            >
+              <Send size={14} />
+            </button>
+          </div>
+        </div>
+
+        {/* Right: Globe */}
+        <div className="w-80 shrink-0 flex flex-col min-h-0">
+          <div className="flex-1 rounded-xl overflow-hidden"
+            style={{ background: 'rgba(0,5,20,0.8)', border: '1px solid rgba(0,210,255,0.15)' }}
+          >
+            <canvas ref={canvasRef} className="w-full h-full" />
+          </div>
+          {selectedCountry && (
+            <button
+              onClick={() => { setSelectedCountry(null); setNews([]); }}
+              className="mt-2 w-full py-2 rounded-lg text-xs font-mono transition-all"
+              style={{
+                background: 'rgba(255,255,255,0.06)',
+                color: '#00d2ff',
+                border: '1px solid rgba(0,210,255,0.2)',
+              }}
+            >
+              Clear Selection
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
